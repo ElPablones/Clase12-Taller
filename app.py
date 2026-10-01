@@ -22,7 +22,6 @@ def crear_baraja():
 def calcular_puntaje(mano):
     puntaje = sum([carta[1] for carta in mano])
     ases = sum([1 for carta in mano if carta[0] == 'A'])
-    # Ajustar el As de 11 a 1 si nos pasamos de 21
     while puntaje > 21 and ases > 0:
         puntaje -= 10
         ases -= 1
@@ -40,7 +39,7 @@ def mostrar_mano(mano, ocultar_segunda=False):
 # --- INICIALIZACIÓN DE VARIABLES DE SESIÓN ---
 
 if 'estado_juego' not in st.session_state:
-    st.session_state.estado_juego = 'apostar' # Estados: 'apostar', 'jugando', 'fin'
+    st.session_state.estado_juego = 'apostar'
 if 'baraja' not in st.session_state:
     st.session_state.baraja = []
 if 'mano_jugador' not in st.session_state:
@@ -51,6 +50,9 @@ if 'apuesta' not in st.session_state:
     st.session_state.apuesta = 0
 if 'mensaje_final' not in st.session_state:
     st.session_state.mensaje_final = ""
+# NUEVO: Billetera del jugador
+if 'dinero' not in st.session_state:
+    st.session_state.dinero = 2000 
 
 # --- CARGAR MODELO MNIST ---
 
@@ -62,6 +64,20 @@ def load_mnist_model():
     return None
 
 model = load_mnist_model()
+
+# --- BILLETERA EN SIDEBAR ---
+with st.sidebar:
+    st.header("🏦 Tu Billetera")
+    
+    # Mostrar el saldo con colores dependiendo de si estás ganando o perdiendo
+    if st.session_state.dinero > 0:
+        st.metric(label="Saldo Actual", value=f"${st.session_state.dinero}")
+    else:
+        st.metric(label="Saldo Actual", value=f"${st.session_state.dinero}", delta="- Bancarrota")
+        st.error("¡Te quedaste sin fondos!")
+        if st.button("💸 Pedir préstamo al casino (Reiniciar)"):
+            st.session_state.dinero = 2000
+            st.rerun()
 
 # --- INTERFAZ PRINCIPAL ---
 
@@ -83,7 +99,7 @@ if st.session_state.estado_juego == 'apostar':
             height=300,
             drawing_mode="freedraw",
             key="canvas_bet",
-            return_image_data=True  # Habilita la exportación de la imagen
+            return_image_data=True 
         )
         
     with col2:
@@ -95,27 +111,33 @@ if st.session_state.estado_juego == 'apostar':
             if canvas_result is not None and canvas_result.json_data is not None:
                 try:
                     if canvas_result.image_data is not None and np.max(canvas_result.image_data) > 0:
-                        with st.spinner("La IA está leyendo tus fichas..."):
-                            # Procesar imagen
-                            image = Image.fromarray(canvas_result.image_data.astype("uint8")).convert("L")
-                            image_resized = image.resize((28, 28), Image.Resampling.LANCZOS)
-                            img_array = np.array(image_resized) / 255.0
-                            img_array = img_array.reshape(1, 28, 28, 1)
-                            
-                            # Predecir número dibujado
-                            prediccion = model.predict(img_array, verbose=0)
-                            digito = np.argmax(prediccion)
-                            
-                            if digito == 0:
-                                digito = 10 # Si dibuja un 0, le damos valor de 10 por la casa
+                        if st.session_state.dinero <= 0:
+                            st.warning("No tienes dinero para apostar. Pide un préstamo en el menú lateral.")
+                        else:
+                            with st.spinner("La IA está leyendo tus fichas..."):
+                                image = Image.fromarray(canvas_result.image_data.astype("uint8")).convert("L")
+                                image_resized = image.resize((28, 28), Image.Resampling.LANCZOS)
+                                img_array = np.array(image_resized) / 255.0
+                                img_array = img_array.reshape(1, 28, 28, 1)
                                 
-                            # Configurar juego
-                            st.session_state.apuesta = digito * 100
-                            st.session_state.baraja = crear_baraja()
-                            st.session_state.mano_jugador = [st.session_state.baraja.pop(), st.session_state.baraja.pop()]
-                            st.session_state.mano_dealer = [st.session_state.baraja.pop(), st.session_state.baraja.pop()]
-                            st.session_state.estado_juego = 'jugando'
-                            st.rerun()
+                                prediccion = model.predict(img_array, verbose=0)
+                                digito = np.argmax(prediccion)
+                                
+                                if digito == 0:
+                                    digito = 10 
+                                    
+                                apuesta_calculada = digito * 100
+                                # Si la apuesta es mayor al dinero que tiene, apuesta todo lo que le queda (All-in)
+                                if apuesta_calculada > st.session_state.dinero:
+                                    st.session_state.apuesta = st.session_state.dinero
+                                else:
+                                    st.session_state.apuesta = apuesta_calculada
+                                    
+                                st.session_state.baraja = crear_baraja()
+                                st.session_state.mano_jugador = [st.session_state.baraja.pop(), st.session_state.baraja.pop()]
+                                st.session_state.mano_dealer = [st.session_state.baraja.pop(), st.session_state.baraja.pop()]
+                                st.session_state.estado_juego = 'jugando'
+                                st.rerun()
                     else:
                         st.warning("Debes dibujar un número primero.")
                 except RuntimeError:
@@ -139,7 +161,6 @@ elif st.session_state.estado_juego == 'jugando':
         st.write(f"Puntaje: **{puntaje_actual}**")
         
         st.write("---")
-        # Botones de Acción
         btn_pedir, btn_plantar = st.columns(2)
         
         with btn_pedir:
@@ -148,26 +169,30 @@ elif st.session_state.estado_juego == 'jugando':
                 if calcular_puntaje(st.session_state.mano_jugador) > 21:
                     st.session_state.estado_juego = 'fin'
                     st.session_state.mensaje_final = "💥 ¡Te pasaste de 21! La casa gana."
+                    # Restamos la apuesta de la billetera
+                    st.session_state.dinero -= st.session_state.apuesta
                 st.rerun()
                 
         with btn_plantar:
             if st.button("✋ Plantarse", type="primary", use_container_width=True):
-                # Turno del dealer (siempre pide hasta tener 17 o más)
                 while calcular_puntaje(st.session_state.mano_dealer) < 17:
                     st.session_state.mano_dealer.append(st.session_state.baraja.pop())
                 
-                # Definir ganador
                 p_jugador = calcular_puntaje(st.session_state.mano_jugador)
                 p_dealer = calcular_puntaje(st.session_state.mano_dealer)
                 
                 if p_dealer > 21:
-                    st.session_state.mensaje_final = f"🎉 ¡El Croupier se pasó con {p_dealer}! GANASTE **${st.session_state.apuesta * 2}**."
+                    st.session_state.mensaje_final = f"🎉 ¡El Croupier se pasó con {p_dealer}! GANASTE **${st.session_state.apuesta}**."
+                    st.session_state.dinero += st.session_state.apuesta
                 elif p_jugador > p_dealer:
-                    st.session_state.mensaje_final = f"🏆 ¡Tu puntaje es mayor! GANASTE **${st.session_state.apuesta * 2}**."
+                    st.session_state.mensaje_final = f"🏆 ¡Tu puntaje es mayor! GANASTE **${st.session_state.apuesta}**."
+                    st.session_state.dinero += st.session_state.apuesta
                 elif p_dealer > p_jugador:
                     st.session_state.mensaje_final = "💸 La casa gana esta vez."
+                    st.session_state.dinero -= st.session_state.apuesta
                 else:
                     st.session_state.mensaje_final = "🤝 Empate. Recuperas tu apuesta."
+                    # En empate, el saldo se mantiene igual
                     
                 st.session_state.estado_juego = 'fin'
                 st.rerun()
