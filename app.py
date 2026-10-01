@@ -12,7 +12,7 @@ st.set_page_config(page_title="AI Blackjack", page_icon="🃏", layout="wide")
 # --- LÓGICA DEL BLACKJACK ---
 
 def crear_baraja():
-    palos = ['♠️', '♥️', '♣️️', '♦️']
+    palos = ['♠️', '♥️', '♣', '♦️']
     valores = [('2', 2), ('3', 3), ('4', 4), ('5', 5), ('6', 6), ('7', 7), 
                ('8', 8), ('9', 9), ('10', 10), ('J', 10), ('Q', 10), ('K', 10), ('A', 11)]
     baraja = [(val[0], val[1], palo) for palo in palos for val in valores]
@@ -83,6 +83,7 @@ if st.session_state.estado_juego == 'apostar':
             height=300,
             drawing_mode="freedraw",
             key="canvas_bet",
+            return_image_data=True  # Habilita la exportación de la imagen
         )
         
     with col2:
@@ -91,30 +92,34 @@ if st.session_state.estado_juego == 'apostar':
             st.error("⚠️ Falta el modelo `mnist_model.h5` en la carpeta.")
             
         if st.button("🎰 Leer Apuesta y Repartir Cartas", type="primary", use_container_width=True):
-            if canvas_result.image_data is not None and np.max(canvas_result.image_data) > 0:
-                with st.spinner("La IA está leyendo tus fichas..."):
-                    # Procesar imagen
-                    image = Image.fromarray(canvas_result.image_data.astype("uint8")).convert("L")
-                    image_resized = image.resize((28, 28), Image.Resampling.LANCZOS)
-                    img_array = np.array(image_resized) / 255.0
-                    img_array = img_array.reshape(1, 28, 28, 1)
-                    
-                    # Predecir número dibujado
-                    prediccion = model.predict(img_array, verbose=0)
-                    digito = np.argmax(prediccion)
-                    
-                    if digito == 0:
-                        digito = 10 # Si dibuja un 0, le damos valor de 10 por la casa
-                        
-                    # Configurar juego
-                    st.session_state.apuesta = digito * 100
-                    st.session_state.baraja = crear_baraja()
-                    st.session_state.mano_jugador = [st.session_state.baraja.pop(), st.session_state.baraja.pop()]
-                    st.session_state.mano_dealer = [st.session_state.baraja.pop(), st.session_state.baraja.pop()]
-                    st.session_state.estado_juego = 'jugando'
-                    st.rerun()
-            else:
-                st.warning("Debes dibujar un número primero.")
+            if canvas_result is not None and canvas_result.json_data is not None:
+                try:
+                    if canvas_result.image_data is not None and np.max(canvas_result.image_data) > 0:
+                        with st.spinner("La IA está leyendo tus fichas..."):
+                            # Procesar imagen
+                            image = Image.fromarray(canvas_result.image_data.astype("uint8")).convert("L")
+                            image_resized = image.resize((28, 28), Image.Resampling.LANCZOS)
+                            img_array = np.array(image_resized) / 255.0
+                            img_array = img_array.reshape(1, 28, 28, 1)
+                            
+                            # Predecir número dibujado
+                            prediccion = model.predict(img_array, verbose=0)
+                            digito = np.argmax(prediccion)
+                            
+                            if digito == 0:
+                                digito = 10 # Si dibuja un 0, le damos valor de 10 por la casa
+                                
+                            # Configurar juego
+                            st.session_state.apuesta = digito * 100
+                            st.session_state.baraja = crear_baraja()
+                            st.session_state.mano_jugador = [st.session_state.baraja.pop(), st.session_state.baraja.pop()]
+                            st.session_state.mano_dealer = [st.session_state.baraja.pop(), st.session_state.baraja.pop()]
+                            st.session_state.estado_juego = 'jugando'
+                            st.rerun()
+                    else:
+                        st.warning("Debes dibujar un número primero.")
+                except RuntimeError:
+                    pass
 
 elif st.session_state.estado_juego == 'jugando':
     st.markdown(f"### 💵 Apuesta en la mesa: **${st.session_state.apuesta}**")
